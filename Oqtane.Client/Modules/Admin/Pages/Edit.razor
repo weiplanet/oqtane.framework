@@ -112,38 +112,55 @@
                         </td>
                         <td>
                             <select id="Theme" class="form-control" @onchange="(e => ThemeChanged(e))">
-                                <option value="-">&lt;Select Theme&gt;</option>
-                                @foreach (KeyValuePair<string, string> item in _themes)
+                                <option value="-">&lt;Inherit From Site&gt;</option>
+                                @foreach (var theme in _themes)
                                 {
-                                    if (item.Key == _themetype)
+                                    if (theme.TypeName == _themetype)
                                     {
-                                        <option value="@item.Key" selected>@item.Value</option>
+                                        <option value="@theme.TypeName" selected>@theme.Name</option>
                                     }
                                     else
                                     {
-                                        <option value="@item.Key">@item.Value</option>
+                                        <option value="@theme.TypeName">@theme.Name</option>
                                     }
                                 }
                             </select>
                         </td>
                     </tr>
+                    @if (_layouts.Count > 0)
+                    {
+                        <tr>
+                            <td>
+                                <Label For="Layout" HelpText="Select a layout for the page (if the selected theme supports it)">Layout: </Label>
+                            </td>
+                            <td>
+                                <select id="Layout" class="form-control" @bind="@_layouttype">
+                                    <option value="-">&lt;Inherit From Site&gt;</option>
+                                    @foreach (var layout in _layouts)
+                                    {
+                                        if (layout.TypeName == _layouttype)
+                                        {
+                                            <option value="@(layout.TypeName)" selected>@(layout.Name)</option>
+                                        }
+                                        else
+                                        {
+                                            <option value="@(layout.TypeName)">@(layout.Name)</option>
+                                        }
+                                    }
+                                </select>
+                            </td>
+                        </tr>
+                    }
                     <tr>
                         <td>
-                            <Label For="Layout" HelpText="Select a layout for the page (if the selected theme supports it)">Layout: </Label>
+                            <Label For="defaultContainer" HelpText="Select the default container for the page">Default Container: </Label>
                         </td>
                         <td>
-                            <select id="Layout" class="form-control" @bind="@_layouttype">
-                                <option value="-">&lt;Select Layout&gt;</option>
-                                @foreach (KeyValuePair<string, string> panelayout in _panelayouts)
+                            <select id="defaultContainer" class="form-control" @bind="@_containertype">
+                                <option value="-">&lt;Inherit From Site&gt;</option>
+                                @foreach (var container in _containers)
                                 {
-                                    if (panelayout.Key == _layouttype)
-                                    {
-                                        <option value="@panelayout.Key" selected>@panelayout.Value</option>
-                                    }
-                                    else
-                                    {
-                                        <option value="@panelayout.Key">@panelayout.Value</option>
-                                    }
+                                    <option value="@container.TypeName">@container.Name</option>
                                 }
                             </select>
                         </td>
@@ -154,17 +171,6 @@
                         </td>
                         <td>
                             <input id="Icon" class="form-control" @bind="@_icon" />
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <Label For="Default-Mode" HelpText="Select the default administration mode you want for this page">Default Mode? </Label>
-                        </td>
-                        <td>
-                            <select id="Default-Mode" class="form-control" @bind="@_mode">
-                                <option value="view">View Mode</option>
-                                <option value="edit">Edit Mode</option>
-                            </select>
                         </td>
                     </tr>
                     <tr>
@@ -185,22 +191,26 @@
         }
     </TabPanel>
     <TabPanel Name="Permissions">
-        <table class="table table-borderless">
-            <tr>
-                <td>
-                    <PermissionGrid EntityName="@EntityNames.Page" Permissions="@_permissions" @ref="_permissionGrid" />
-                </td>
-            </tr>
-        </table>
+        @if (_permissions != null)
+        {
+            <table class="table table-borderless">
+                <tr>
+                    <td>
+                        <PermissionGrid EntityName="@EntityNames.Page" Permissions="@_permissions" @ref="_permissionGrid" />
+                    </td>
+                </tr>
+            </table>
+        }
     </TabPanel>
 </TabStrip>
 <button type="button" class="btn btn-success" @onclick="SavePage">Save</button>
 <NavLink class="btn btn-secondary" href="@NavigateUrl()">Cancel</NavLink>
 
 @code {
-    private Dictionary<string, string> _themes;
-    private Dictionary<string, string> _panelayouts;
     private List<Theme> _themeList;
+    private List<ThemeControl> _themes = new List<ThemeControl>();
+    private List<ThemeControl> _layouts = new List<ThemeControl>();
+    private List<ThemeControl> _containers = new List<ThemeControl>();
     private List<Page> _pageList;
     private int _pageId;
     private string _name;
@@ -214,11 +224,11 @@
     private string _isnavigation;
     private string _url;
     private string _ispersonalizable;
-    private string _mode;
     private string _themetype = "-";
     private string _layouttype = "-";
+    private string _containertype = "-";
     private string _icon;
-    private string _permissions;
+    private string _permissions = null;
     private string _createdby;
     private DateTime _createdon;
     private string _modifiedby;
@@ -236,11 +246,11 @@
     {
         try
         {
-            _themeList = await ThemeService.GetThemesAsync();
             _pageList = PageState.Pages;
             _children = PageState.Pages.Where(item => item.ParentId == null).ToList();
 
-            _themes = ThemeService.GetThemeTypes(_themeList);
+            _themeList = await ThemeService.GetThemesAsync();
+            _themes = ThemeService.GetThemeControls(_themeList);
 
             _pageId = Int32.Parse(PageState.QueryString["id"]);
             var page = PageState.Pages.FirstOrDefault(item => item.PageId == _pageId);
@@ -268,17 +278,22 @@
                 _isnavigation = page.IsNavigation.ToString();
                 _url = page.Url;
                 _ispersonalizable = page.IsPersonalizable.ToString();
-                _mode = (page.EditMode) ? "edit" : "view";
                 _themetype = page.ThemeType;
-                _panelayouts = ThemeService.GetPaneLayoutTypes(_themeList, _themetype);
-                _layouttype = page.LayoutType;
                 if (_themetype == PageState.Site.DefaultThemeType)
                 {
                     _themetype = "-";
                 }
+                _layouts = ThemeService.GetLayoutControls(_themeList, page.ThemeType);
+                _layouttype = page.LayoutType;
                 if (_layouttype == PageState.Site.DefaultLayoutType)
                 {
                     _layouttype = "-";
+                }
+                _containers = ThemeService.GetContainerControls(_themeList, page.ThemeType);
+                _containertype = page.DefaultContainerType;
+                if (string.IsNullOrEmpty(_containertype))
+                {
+                    _containertype = "-";
                 }
                 _icon = page.Icon;
                 _permissions = page.Permissions;
@@ -305,7 +320,7 @@
             _children = new List<Page>();
             if (_parentid == "-1")
             {
-                foreach(Page p in PageState.Pages.Where(item => item.ParentId == null))
+                foreach (Page p in PageState.Pages.Where(item => item.ParentId == null))
                 {
                     if (UserSecurity.IsAuthorized(PageState.User, PermissionNames.View, p.Permissions))
                     {
@@ -347,12 +362,16 @@
             _themetype = (string)e.Value;
             if (_themetype != "-")
             {
-                _panelayouts = ThemeService.GetPaneLayoutTypes(_themeList, _themetype);
+                _layouts = ThemeService.GetLayoutControls(_themeList, _themetype);
+                _containers = ThemeService.GetContainerControls(_themeList, _themetype);
             }
             else
             {
-                _panelayouts = new Dictionary<string, string>();
+                _layouts = new List<ThemeControl>();
+                _containers = new List<ThemeControl>();
             }
+            _layouttype = "-";
+            _containertype = "-";
             StateHasChanged();
         }
         catch (Exception ex)
@@ -401,6 +420,13 @@
                         page.Path = parent.Path + "/" + Utilities.GetFriendlyUrl(_path);
                     }
                 }
+
+                if (!PagePathIsUnique(page.Path, page.SiteId, page.PageId, _pageList))
+                {
+                    AddModuleMessage($"A page with path {_path} already exists for the selected parent page. The page path needs to be unique for the selected parent.", MessageType.Warning);
+                    return;
+                }
+
                 if (_insert != "=")
                 {
                     Page child;
@@ -424,16 +450,20 @@
                 }
                 page.IsNavigation = (_isnavigation == null || Boolean.Parse(_isnavigation));
                 page.Url = _url;
-                page.EditMode = (_mode == "edit");
                 page.ThemeType = (_themetype != "-") ? _themetype : string.Empty;
-                page.LayoutType = (_layouttype != "-") ? _layouttype : string.Empty;
-                if (page.ThemeType == PageState.Site.DefaultThemeType)
+                if (!string.IsNullOrEmpty(page.ThemeType) && page.ThemeType == PageState.Site.DefaultThemeType)
                 {
                     page.ThemeType = string.Empty;
                 }
-                if (page.LayoutType == PageState.Site.DefaultLayoutType)
+                page.LayoutType = (_layouttype != "-") ? _layouttype : string.Empty;
+                if (!string.IsNullOrEmpty(page.LayoutType) && page.LayoutType == PageState.Site.DefaultLayoutType)
                 {
                     page.LayoutType = string.Empty;
+                }
+                page.DefaultContainerType = (_containertype != "-") ? _containertype : string.Empty;
+                if (!string.IsNullOrEmpty(page.DefaultContainerType) && page.DefaultContainerType == PageState.Site.DefaultContainerType)
+                {
+                    page.DefaultContainerType = string.Empty;
                 }
                 page.Icon = _icon ?? string.Empty;
                 page.Permissions = _permissionGrid.GetPermissions();
@@ -474,5 +504,10 @@
             await logger.LogError(ex, "Error Saving Page {Page} {Error}", page, ex.Message);
             AddModuleMessage("Error Saving Page", MessageType.Error);
         }
+    }
+
+    private static bool PagePathIsUnique(string pagePath, int siteId, int pageId, List<Page> existingPages)
+    {
+        return !existingPages.Any(page => page.SiteId == siteId && page.Path == pagePath && page.PageId != pageId);
     }
 }

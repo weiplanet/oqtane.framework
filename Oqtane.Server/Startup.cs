@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -26,29 +27,48 @@ namespace Oqtane
 {
     public class Startup
     {
-        public IConfigurationRoot Configuration { get; }
         private string _webRoot;
         private Runtime _runtime;
-        
-        public Startup(IWebHostEnvironment env)
+        private bool _useSwagger;
+        private IWebHostEnvironment _env;
+        private string[] _supportedCultures;
+
+        public IConfigurationRoot Configuration { get; }
+
+        public Startup(IWebHostEnvironment env, ILocalizationManager localizationManager)
         {
             var builder = new ConfigurationBuilder()
                 .SetBasePath(env.ContentRootPath)
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
             Configuration = builder.Build();
 
-             _runtime = (Configuration.GetSection("Runtime").Value == "WebAssembly") ? Runtime.WebAssembly : Runtime.Server;
+            _supportedCultures = localizationManager.GetSupportedCultures();
 
-            _webRoot = env.WebRootPath;              
+            _runtime = (Configuration.GetSection("Runtime").Value == "WebAssembly") ? Runtime.WebAssembly : Runtime.Server;
+
+            //add possibility to switch off swagger on production.
+            _useSwagger = Configuration.GetSection("UseSwagger").Value != "false";
+
+            _webRoot = env.WebRootPath;
             AppDomain.CurrentDomain.SetData("DataDirectory", Path.Combine(env.ContentRootPath, "Data"));
+
+            _env = env;
         }
 
         // This method gets called by the runtime. Use this method to add services to the container.
         // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
         public void ConfigureServices(IServiceCollection services)
         {
-            
-            services.AddServerSideBlazor();
+            // Register localization services
+            services.AddLocalization(options => options.ResourcesPath = "Resources");
+
+            services.AddServerSideBlazor().AddCircuitOptions(options =>
+            {
+                if (_env.IsDevelopment())
+                {
+                    options.DetailedErrors = true;
+                }
+            });
 
             // setup HttpClient for server side in a client side compatible fashion ( with auth cookie )
             if (!services.Any(x => x.ServiceType == typeof(HttpClient)))
@@ -59,7 +79,7 @@ namespace Oqtane
                     var navigationManager = s.GetRequiredService<NavigationManager>();
                     var httpContextAccessor = s.GetRequiredService<IHttpContextAccessor>();
                     var authToken = httpContextAccessor.HttpContext.Request.Cookies[".AspNetCore.Identity.Application"];
-                    var client = new HttpClient(new HttpClientHandler { UseCookies = false });
+                    var client = new HttpClient(new HttpClientHandler {UseCookies = false});
                     if (authToken != null)
                     {
                         client.DefaultRequestHeaders.Add("Cookie", ".AspNetCore.Identity.Application=" + authToken);
@@ -69,16 +89,16 @@ namespace Oqtane
                 });
             }
 
-            // register authorization services
+            // register custom authorization policies
             services.AddAuthorizationCore(options =>
             {
-                options.AddPolicy("ViewPage", policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Page, PermissionNames.View)));
-                options.AddPolicy("EditPage", policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Page, PermissionNames.Edit)));
-                options.AddPolicy("ViewModule", policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Module, PermissionNames.View)));
-                options.AddPolicy("EditModule", policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Module, PermissionNames.Edit)));
-                options.AddPolicy("ViewFolder", policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Folder, PermissionNames.View)));
-                options.AddPolicy("EditFolder", policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Folder, PermissionNames.Edit)));
-                options.AddPolicy("ListFolder", policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Folder, PermissionNames.Browse)));
+                options.AddPolicy(PolicyNames.ViewPage, policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Page, PermissionNames.View)));
+                options.AddPolicy(PolicyNames.EditPage, policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Page, PermissionNames.Edit)));
+                options.AddPolicy(PolicyNames.ViewModule, policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Module, PermissionNames.View)));
+                options.AddPolicy(PolicyNames.EditModule, policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Module, PermissionNames.Edit)));
+                options.AddPolicy(PolicyNames.ViewFolder, policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Folder, PermissionNames.View)));
+                options.AddPolicy(PolicyNames.EditFolder, policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Folder, PermissionNames.Edit)));
+                options.AddPolicy(PolicyNames.ListFolder, policy => policy.Requirements.Add(new PermissionRequirement(EntityNames.Folder, PermissionNames.Browse)));
             });
 
             // register scoped core services
@@ -113,7 +133,7 @@ namespace Oqtane
 
             services.AddDbContext<MasterDBContext>(options =>
                 options.UseSqlServer(Configuration.GetConnectionString("DefaultConnection")
-                    .Replace("|DataDirectory|", AppDomain.CurrentDomain.GetData("DataDirectory")?.ToString())
+                    .Replace("|DataDirectory|", AppContext.GetData("DataDirectory")?.ToString())
                 ));
             services.AddDbContext<TenantDBContext>(options => { });
 
@@ -121,7 +141,7 @@ namespace Oqtane
                 .AddEntityFrameworkStores<TenantDBContext>()
                 .AddSignInManager()
                 .AddDefaultTokenProviders();
-            
+
             services.Configure<IdentityOptions>(options =>
             {
                 // Password settings
@@ -163,7 +183,7 @@ namespace Oqtane
             services.AddSingleton<IDatabaseManager, DatabaseManager>();
 
             // install any modules or themes ( this needs to occur BEFORE the assemblies are loaded into the app domain )
-            InstallationManager.UnpackPackages("Modules,Themes", _webRoot);
+            InstallationManager.InstallPackages("Modules,Themes", _webRoot);
 
             // register transient scoped core services
             services.AddTransient<IModuleDefinitionRepository, ModuleDefinitionRepository>();
@@ -184,6 +204,7 @@ namespace Oqtane
             services.AddTransient<ISettingRepository, SettingRepository>();
             services.AddTransient<ILogRepository, LogRepository>();
             services.AddTransient<ILogManager, LogManager>();
+            services.AddTransient<ILocalizationManager, LocalizationManager>();
             services.AddTransient<IJobRepository, JobRepository>();
             services.AddTransient<IJobLogRepository, JobLogRepository>();
             services.AddTransient<INotificationRepository, NotificationRepository>();
@@ -194,24 +215,24 @@ namespace Oqtane
             services.AddTransient<IUpgradeManager, UpgradeManager>();
 
             // load the external assemblies into the app domain, install services 
-            services.AddOqtaneParts(_runtime);
+            services.AddOqtane(_runtime, _supportedCultures);
 
             services.AddMvc()
                 .AddNewtonsoftJson()
                 .AddOqtaneApplicationParts() // register any Controllers from custom modules
-                .ConfigureOqtaneMvc();       // any additional configuration from IStart classes.
+                .ConfigureOqtaneMvc(); // any additional configuration from IStart classes.
 
-            services.AddSwaggerGen(c =>
+            if (_useSwagger)
             {
-                c.SwaggerDoc("v1", new OpenApiInfo { Title = "Oqtane", Version = "v1" });
-            });
-
-
+                services.AddSwaggerGen(c => { c.SwaggerDoc("v1", new OpenApiInfo {Title = "Oqtane", Version = "v1"}); });
+            }
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
+            ServiceActivator.Configure(app.ApplicationServices);
+
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
@@ -222,17 +243,23 @@ namespace Oqtane
                 // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
                 app.UseHsts();
             }
+            // to allow install middleware it should be moved up
+            app.ConfigureOqtaneAssemblies(env);
+
+            // Allow oqtane localization middleware
+            app.UseOqtaneLocalization();
+
             app.UseHttpsRedirection();
             app.UseStaticFiles();
             app.UseBlazorFrameworkFiles();
             app.UseRouting();
             app.UseAuthentication();
             app.UseAuthorization();
-            app.UseSwagger();
-            app.UseSwaggerUI(c =>
+            if (_useSwagger)
             {
-                c.SwaggerEndpoint("/swagger/v1/swagger.json", "Oqtane V1");
-            });
+                app.UseSwagger();
+                app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Oqtane V1"); });
+            }
 
             app.UseEndpoints(endpoints =>
             {
@@ -240,7 +267,6 @@ namespace Oqtane
                 endpoints.MapControllers();
                 endpoints.MapFallbackToPage("/_Host");
             });
-            app.ConfigureOqtaneAssemblies(env);
         }
     }
 }

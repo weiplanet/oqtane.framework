@@ -1,17 +1,19 @@
-﻿using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Microsoft.Extensions.DependencyInjection;
-using System.Threading.Tasks;
-using Oqtane.Services;
-using System.Reflection;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Json;
-using Oqtane.Modules;
-using Oqtane.Shared;
-using Oqtane.Providers;
+using System.Reflection;
+using System.Threading.Tasks;
+using System.Runtime.Loader;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Oqtane.Modules;
+using Oqtane.Providers;
+using Oqtane.Shared;
+using Oqtane.Services;
 
 namespace Oqtane.Client
 {
@@ -25,6 +27,9 @@ namespace Oqtane.Client
 
             builder.Services.AddSingleton(httpClient);
             builder.Services.AddOptions();
+
+            // Register localization services
+            builder.Services.AddLocalization(options => options.ResourcesPath = "Resources");
 
             // register auth services
             builder.Services.AddAuthorizationCore();
@@ -60,45 +65,81 @@ namespace Oqtane.Client
 
             await LoadClientAssemblies(httpClient);
 
-            // dynamically register module contexts and repository services
-            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            foreach (Assembly assembly in assemblies)
+            var assemblies = AppDomain.CurrentDomain.GetOqtaneAssemblies();
+            foreach (var assembly in assemblies)
             {
-                var implementationTypes = assembly.GetTypes()
-                    .Where(item => item.GetInterfaces().Contains(typeof(IService)));
-
-                foreach (Type implementationtype in implementationTypes)
+                // dynamically register module services 
+                var implementationTypes = assembly.GetInterfaces<IService>(); 
+                foreach (var implementationType in implementationTypes)
                 {
-                    Type servicetype = Type.GetType(implementationtype.AssemblyQualifiedName.Replace(implementationtype.Name, "I" + implementationtype.Name));
-                    if (servicetype != null)
+                    if (implementationType.AssemblyQualifiedName != null)
                     {
-                        builder.Services.AddScoped(servicetype, implementationtype); // traditional service interface
-                    }
-                    else
-                    {
-                        builder.Services.AddScoped(implementationtype, implementationtype); // no interface defined for service
+                        var serviceType = Type.GetType(implementationType.AssemblyQualifiedName.Replace(implementationType.Name, $"I{implementationType.Name}"));
+                        builder.Services.AddScoped(serviceType ?? implementationType, implementationType);
                     }
                 }
 
-                assembly.GetInstances<IClientStartup>()
-                    .ToList()
-                    .ForEach(x => x.ConfigureServices(builder.Services));
+                // register client startup services
+                var startUps = assembly.GetInstances<IClientStartup>();
+                foreach (var startup in startUps)
+                {
+                    startup.ConfigureServices(builder.Services);
+                }
             }
 
-            await builder.Build().RunAsync();
+            var host = builder.Build();
+
+            ServiceActivator.Configure(host.Services);
+
+            await host.RunAsync();
         }
 
         private static async Task LoadClientAssemblies(HttpClient http)
         {
-            var list = await http.GetFromJsonAsync<List<string>>($"/~/api/ModuleDefinition/load");
-            // get list of loaded assemblies on the client ( in the client-side hosting module the browser client has its own app domain )
-            var assemblyList = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetName().Name).ToList();
-            foreach (var name in list)
+            // get list of loaded assemblies on the client 
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetName().Name).ToList();
+
+            // get assemblies from server and load into client app domain
+            var zip = await http.GetByteArrayAsync($"/~/api/Installation/load");
+
+            // asemblies and debug symbols are packaged in a zip file
+            using (ZipArchive archive = new ZipArchive(new MemoryStream(zip)))
             {
-                if (assemblyList.Contains(name)) continue;
-                // download assembly from server and load
-                var bytes = await http.GetByteArrayAsync($"/~/api/ModuleDefinition/load/{name}.dll");
-                Assembly.Load(bytes);
+                var dlls = new Dictionary<string, byte[]>();
+                var pdbs = new Dictionary<string, byte[]>();
+
+                foreach (ZipArchiveEntry entry in archive.Entries)
+                {
+                    if (!assemblies.Contains(Path.GetFileNameWithoutExtension(entry.Name)))
+                    {
+                        using (var memoryStream = new MemoryStream())
+                        {
+                            entry.Open().CopyTo(memoryStream);
+                            byte[] file = memoryStream.ToArray();
+                            switch (Path.GetExtension(entry.Name))
+                            {
+                                case ".dll":
+                                    dlls.Add(entry.Name, file);
+                                    break;
+                                case ".pdb":
+                                    pdbs.Add(entry.Name, file);
+                                    break;
+                            }
+                        }
+                    }
+                }
+
+                foreach (var item in dlls)
+                {
+                    if (pdbs.ContainsKey(item.Key))
+                    {
+                        AssemblyLoadContext.Default.LoadFromStream(new MemoryStream(item.Value), new MemoryStream(pdbs[item.Key]));
+                    }
+                    else
+                    {
+                        AssemblyLoadContext.Default.LoadFromStream(new MemoryStream(item.Value));
+                    }
+                }
             }
         }
     }

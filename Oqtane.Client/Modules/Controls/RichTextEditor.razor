@@ -1,7 +1,5 @@
 ﻿@namespace Oqtane.Modules.Controls
-@inherits ModuleBase
-@attribute [OqtaneIgnore]
-@inject IJSRuntime JsRuntime
+@inherits ModuleControlBase
 
 <div class="row" style="margin-bottom: 50px;">
     <div class="col">
@@ -10,7 +8,7 @@
                 @if (_filemanagervisible)
                 {
                     <FileManager @ref="_fileManager" Filter="@Constants.ImageFiles" />
-                    @((MarkupString)_message)
+                    <ModuleMessage Message="@_message" Type="MessageType.Warning"></ModuleMessage>
                     <br />
                 }
                 <div class="row justify-content-center" style="margin-bottom: 20px;">
@@ -108,6 +106,13 @@
     [Parameter]
     public string DebugLevel { get; set; } = "info";
 
+    public override List<Resource> Resources => new List<Resource>()
+    {
+        new Resource { ResourceType = ResourceType.Script, Bundle = "Quill", Url = "js/quill1.3.6.min.js" },
+        new Resource { ResourceType = ResourceType.Script, Bundle = "Quill", Url = "js/quill-blot-formatter.min.js" },
+        new Resource { ResourceType = ResourceType.Script, Bundle = "Quill", Url = "js/quill-interop.js" }
+    };
+
     protected override void OnInitialized()
     {
         _content = Content; // raw HTML
@@ -117,8 +122,11 @@
     {
         if (firstRender)
         {
-            await RichTextEditorInterop.CreateEditor(
-                JsRuntime,
+            await base.OnAfterRenderAsync(firstRender);
+
+            var interop = new RichTextEditorInterop(JSRuntime);
+
+            await interop.CreateEditor(
                 _editorElement,
                 _toolBar,
                 ReadOnly,
@@ -126,14 +134,10 @@
                 Theme,
                 DebugLevel);
 
-            await RichTextEditorInterop.LoadEditorContent(
-                JsRuntime,
-                _editorElement, Content);
+            await interop.LoadEditorContent(_editorElement, Content);
 
             // preserve a copy of the rich text content ( Quill sanitizes content so we need to retrieve it from the editor )
-            _original = await RichTextEditorInterop.GetHtml(
-                JsRuntime,
-                _editorElement);
+            _original = await interop.GetHtml(_editorElement);
         }
     }
 
@@ -146,25 +150,22 @@
 
     public async Task RefreshRichText()
     {
-        await RichTextEditorInterop.LoadEditorContent(
-            JsRuntime,
-            _editorElement, _content);
+        var interop = new RichTextEditorInterop(JSRuntime);
+        await interop.LoadEditorContent(_editorElement, _content);
     }
 
     public async Task RefreshRawHtml()
     {
-        _content = await RichTextEditorInterop.GetHtml(
-            JsRuntime,
-            _editorElement);
+        var interop = new RichTextEditorInterop(JSRuntime);
+        _content = await interop.GetHtml(_editorElement);
         StateHasChanged();
     }
 
     public async Task<string> GetHtml()
     {
         // get rich text content
-        string content = await RichTextEditorInterop.GetHtml(
-                JsRuntime,
-                _editorElement);
+        var interop = new RichTextEditorInterop(JSRuntime);
+        string content = await interop.GetHtml(_editorElement);
 
         if (_original != content)
         {
@@ -180,26 +181,24 @@
 
     public async Task InsertImage()
     {
+        _message = string.Empty;
         if (_filemanagervisible)
         {
             var fileid = _fileManager.GetFileId();
             if (fileid != -1)
             {
-                await RichTextEditorInterop.InsertImage(
-                    JsRuntime,
-                    _editorElement, ContentUrl(fileid));
+                var interop = new RichTextEditorInterop(JSRuntime);
+                await interop.InsertImage(_editorElement, ContentUrl(fileid));
                 _filemanagervisible = false;
-                _message = string.Empty;
             }
             else
             {
-                _message = "<br /><div class=\"alert alert-warning\" role=\"alert\">You Must Select An Image To Insert</div>";
+                _message = "You Must Select An Image To Insert";
             }
         }
         else
         {
             _filemanagervisible = true;
-            _message = string.Empty;
         }
         StateHasChanged();
     }
@@ -207,22 +206,19 @@
     // other rich text editor methods which can be used by developers
     public async Task<string> GetText()
     {
-        return await RichTextEditorInterop.GetText(
-            JsRuntime,
-            _editorElement);
+        var interop = new RichTextEditorInterop(JSRuntime);
+        return await interop.GetText(_editorElement);
     }
 
     public async Task<string> GetContent()
     {
-        return await RichTextEditorInterop.GetContent(
-            JsRuntime,
-            _editorElement);
+        var interop = new RichTextEditorInterop(JSRuntime);
+        return await interop.GetContent(_editorElement);
     }
 
     public async Task EnableEditor(bool mode)
     {
-        await RichTextEditorInterop.EnableEditor(
-            JsRuntime,
-            _editorElement, mode);
+        var interop = new RichTextEditorInterop(JSRuntime);
+        await interop.EnableEditor(_editorElement, mode);
     }
 }

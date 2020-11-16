@@ -3,11 +3,13 @@
 @inject IInstallationService InstallationService
 @inject ISiteService SiteService
 @inject IUserService UserService
+@inject IJSRuntime JSRuntime
 
 <div class="container">
     <div class="row">
         <div class="mx-auto text-center">
-            <img src="oqtane.png" />
+            <img src="oqtane-black.png" />
+            <div style="font-weight: bold">Version: @Constants.Version</div>
         </div>
     </div>
     <hr class="app-rule" />
@@ -117,7 +119,7 @@
     <div class="row">
         <div class="mx-auto text-center">
             <button type="button" class="btn btn-success" @onclick="Install">Install Now</button><br /><br />
-            @((MarkupString) _message)
+            <ModuleMessage Message="@_message" Type="MessageType.Error"></ModuleMessage>
         </div>
         <div class="app-progress-indicator" style="@_loadingDisplay"></div>
     </div>
@@ -127,15 +129,24 @@
     private string _databaseType = "LocalDB";
     private string _serverName = "(LocalDb)\\MSSQLLocalDB";
     private string _databaseName = "Oqtane-" + DateTime.UtcNow.ToString("yyyyMMddHHmm");
-    private string _username = "";
-    private string _password = "";
-    private string _hostUsername = Constants.HostUser;
-    private string _hostPassword = "";
-    private string _confirmPassword = "";
-    private string _hostEmail = "";
-    private string _message = "";
+    private string _username = string.Empty;
+    private string _password = string.Empty;
+    private string _hostUsername = UserNames.Host;
+    private string _hostPassword = string.Empty;
+    private string _confirmPassword = string.Empty;
+    private string _hostEmail = string.Empty;
+    private string _message = string.Empty;
     private string _integratedSecurityDisplay = "display: none;";
     private string _loadingDisplay = "display: none;";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var interop = new Interop(JSRuntime);
+            await interop.IncludeLink("app-stylesheet", "stylesheet", "https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css", "text/css", "sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T", "anonymous", "");
+        }
+    }
 
     private void SetIntegratedSecurity(ChangeEventArgs e)
     {
@@ -177,8 +188,8 @@
                 Aliases = uri.Authority,
                 HostEmail = _hostEmail,
                 HostPassword = _hostPassword,
-                HostName = Constants.HostUser,
-                TenantName = Constants.MasterTenant,
+                HostName = UserNames.Host,
+                TenantName = TenantNames.Master,
                 IsNewTenant = true,
                 SiteName = Constants.DefaultSite
             };
@@ -190,13 +201,13 @@
             }
             else
             {
-                _message = "<div class=\"alert alert-danger\" role=\"alert\">" + installation.Message + "</div>";
+                _message = installation.Message;
                 _loadingDisplay = "display: none;";
             }
         }
         else
         {
-            _message = "<div class=\"alert alert-danger\" role=\"alert\">Please Enter All Fields And Ensure Passwords Match And Are Greater Than 5 Characters In Length</div>";
+            _message = "Please Enter All Fields And Ensure Passwords Match And Are Greater Than 5 Characters In Length";
         }
     }
 

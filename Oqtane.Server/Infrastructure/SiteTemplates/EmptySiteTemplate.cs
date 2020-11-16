@@ -30,11 +30,10 @@ namespace Oqtane.SiteTemplates
                 Icon = "home",
                 IsNavigation = true,
                 IsPersonalizable = false,
-                EditMode = false,
                 PagePermissions = new List<Permission> {
-                    new Permission(PermissionNames.View, Constants.AllUsersRole, true),
-                    new Permission(PermissionNames.View, Constants.AdminRole, true),
-                    new Permission(PermissionNames.Edit, Constants.AdminRole, true)
+                    new Permission(PermissionNames.View, RoleNames.Everyone, true),
+                    new Permission(PermissionNames.View, RoleNames.Admin, true),
+                    new Permission(PermissionNames.Edit, RoleNames.Admin, true)
                 }.EncodePermissions(),
                 PageTemplateModules = new List<PageTemplateModule>()
             });

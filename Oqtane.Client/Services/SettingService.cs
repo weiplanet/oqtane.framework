@@ -1,4 +1,5 @@
-﻿using Oqtane.Models;
+﻿using System;
+using Oqtane.Models;
 using System.Threading.Tasks;
 using System.Net.Http;
 using System.Linq;
@@ -103,10 +104,10 @@ namespace Oqtane.Services
         public async Task UpdateSettingsAsync(Dictionary<string, string> settings, string entityName, int entityId)
         {
             var settingsList = await GetJsonAsync<List<Setting>>($"{Apiurl}?entityname={entityName}&entityid={entityId}");
-            
+
             foreach (KeyValuePair<string, string> kvp in settings)
             {
-                Setting setting = settingsList.FirstOrDefault(item => item.SettingName == kvp.Key);
+                Setting setting = settingsList.FirstOrDefault(item => item.SettingName.Equals(kvp.Key,StringComparison.OrdinalIgnoreCase));
                 if (setting == null)
                 {
                     setting = new Setting();
@@ -152,7 +153,7 @@ namespace Oqtane.Services
         public string GetSetting(Dictionary<string, string> settings, string settingName, string defaultValue)
         {
             string value = defaultValue;
-            if (settings.ContainsKey(settingName))
+            if (settings != null && settings.ContainsKey(settingName))
             {
                 value = settings[settingName];
             }
@@ -161,6 +162,10 @@ namespace Oqtane.Services
 
         public Dictionary<string, string> SetSetting(Dictionary<string, string> settings, string settingName, string settingValue)
         {
+            if (settings == null)
+            {
+                settings = new Dictionary<string, string>();
+            }
             if (settings.ContainsKey(settingName))
             { 
                 settings[settingName] = settingValue;

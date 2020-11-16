@@ -1,11 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
 using Microsoft.Extensions.Hosting;
-using Oqtane.Extensions;
 using Oqtane.Infrastructure;
 using Oqtane.Modules;
 using Oqtane.Services;
@@ -17,10 +15,12 @@ namespace Microsoft.Extensions.DependencyInjection
 {
     public static class OqtaneServiceCollectionExtensions
     {
-        public static IServiceCollection AddOqtaneParts(this IServiceCollection services, Runtime runtime)
+        public static IServiceCollection AddOqtane(this IServiceCollection services, Runtime runtime, string[] supportedCultures)
         {
             LoadAssemblies();
+            LoadSatelliteAssemblies(supportedCultures);
             services.AddOqtaneServices(runtime);
+
             return services;
         }
 
@@ -32,6 +32,7 @@ namespace Microsoft.Extensions.DependencyInjection
             }
 
             var hostedServiceType = typeof(IHostedService);
+
             var assemblies = AppDomain.CurrentDomain.GetOqtaneAssemblies();
             foreach (var assembly in assemblies)
             {
@@ -55,31 +56,34 @@ namespace Microsoft.Extensions.DependencyInjection
                         services.AddSingleton(hostedServiceType, serviceType);
                     }
                 }
-                
+
+                // register server startup services
                 var startUps = assembly.GetInstances<IServerStartup>();
                 foreach (var startup in startUps)
                 {
                     startup.ConfigureServices(services);
                 }
-               
+
                 if (runtime == Runtime.Server)
                 {
-                assembly.GetInstances<IClientStartup>()
-                    .ToList()
-                    .ForEach(x => x.ConfigureServices(services));
+                    // register client startup services if running on server
+                    assembly.GetInstances<IClientStartup>()
+                        .ToList()
+                        .ForEach(x => x.ConfigureServices(services));
                 }
             }
             return services;
         }
 
-        
         private static void LoadAssemblies()
         {
             var assemblyPath = Path.GetDirectoryName(Assembly.GetEntryAssembly()?.Location);
             if (assemblyPath == null) return;
 
-            var assembliesFolder = new DirectoryInfo(assemblyPath);
+            AssemblyLoadContext.Default.Resolving += ResolveDependencies;
 
+            var assembliesFolder = new DirectoryInfo(assemblyPath);
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
 
             // iterate through Oqtane assemblies in /bin ( filter is narrow to optimize loading process )
             foreach (var dll in assembliesFolder.EnumerateFiles($"*.dll", SearchOption.TopDirectoryOnly).Where(f => f.IsOqtaneAssembly()))
@@ -95,7 +99,6 @@ namespace Microsoft.Extensions.DependencyInjection
                     continue;
                 }
 
-                var assemblies = AppDomain.CurrentDomain.GetAssemblies();
                 if (!assemblies.Any(a => AssemblyName.ReferenceMatchesDefinition(assemblyName, a.GetName())))
                 {
                     try
@@ -121,5 +124,71 @@ namespace Microsoft.Extensions.DependencyInjection
                 }
             }
         }
+
+        private static void LoadSatelliteAssemblies(string[] supportedCultures)
+        {
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            var assemblyPath = Path.GetDirectoryName(Assembly.GetEntryAssembly()?.Location);
+            if (assemblyPath == null)
+            {
+                return;
+            }
+
+            AssemblyLoadContext.Default.Resolving += ResolveDependencies;
+
+            foreach (var culture in supportedCultures)
+            {
+                if (culture == Constants.DefaultCulture)
+                {
+                    continue;
+                }
+
+                var assembliesFolder = new DirectoryInfo(Path.Combine(assemblyPath, culture));
+                if (assembliesFolder.Exists)
+                {
+                    foreach (var assemblyFile in assembliesFolder.EnumerateFiles(Constants.SatelliteAssemblyExtension))
+                    {
+                        AssemblyName assemblyName;
+                        try
+                        {
+                            assemblyName = AssemblyName.GetAssemblyName(assemblyFile.FullName);
+                        }
+                        catch
+                        {
+                            Console.WriteLine($"Not Satellite Assembly : {assemblyFile.Name}");
+                            continue;
+                        }
+
+                        try
+                        {
+                            Assembly assembly = AssemblyLoadContext.Default.LoadFromStream(new MemoryStream(File.ReadAllBytes(assemblyFile.FullName)));
+                            Console.WriteLine($"Loaded : {assemblyName}");
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine($"Failed : {assemblyName}\n{e}");
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"The satellite assemblies folder named '{culture}' is not found.");
+                }
+            }
+        }
+
+        private static Assembly ResolveDependencies(AssemblyLoadContext context, AssemblyName name)
+        {
+            var assemblyPath = Path.GetDirectoryName(Assembly.GetEntryAssembly()?.Location) + "\\" + name.Name + ".dll";
+            if (File.Exists(assemblyPath))
+            {
+                return context.LoadFromStream(new MemoryStream(File.ReadAllBytes(assemblyPath)));
+            }
+            else
+            {
+                return null;
+            }
+        }
+
     }
 }

@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components;
 using Oqtane.Shared;
 using Oqtane.Models;
 using System.Threading.Tasks;
@@ -6,6 +6,9 @@ using Oqtane.Services;
 using System;
 using Oqtane.Enums;
 using Oqtane.UI;
+using System.Collections.Generic;
+using Microsoft.JSInterop;
+using System.Linq;
 
 namespace Oqtane.Modules
 {
@@ -14,9 +17,12 @@ namespace Oqtane.Modules
         private Logger _logger;
 
         protected Logger logger => _logger ?? (_logger = new Logger(this));
- 
+
         [Inject]
         protected ILogService LoggingService { get; set; }
+
+        [Inject]
+        protected IJSRuntime JSRuntime { get; set; }
 
         [CascadingParameter]
         protected PageState PageState { get; set; }
@@ -24,9 +30,8 @@ namespace Oqtane.Modules
         [CascadingParameter]
         protected Module ModuleState { get; set; }
 
-        [CascadingParameter] 
+        [CascadingParameter]
         protected ModuleInstance ModuleInstance { get; set; }
-
 
         // optional interface properties
         public virtual SecurityAccessLevel SecurityAccessLevel { get { return SecurityAccessLevel.View; } set { } } // default security
@@ -36,6 +41,30 @@ namespace Oqtane.Modules
         public virtual string Actions { get { return ""; } }
 
         public virtual bool UseAdminContainer { get { return true; } }
+
+        public virtual List<Resource> Resources { get; set; }
+
+        // base lifecycle method for handling JSInterop script registration
+
+        protected override async Task OnAfterRenderAsync(bool firstRender)
+        {
+            if (firstRender)
+            {
+                if (Resources != null && Resources.Exists(item => item.ResourceType == ResourceType.Script))
+                {
+                    var scripts = new List<object>();
+                    foreach (Resource resource in Resources.Where(item => item.ResourceType == ResourceType.Script && item.Declaration != ResourceDeclaration.Global))
+                    {
+                        scripts.Add(new { href = resource.Url, bundle = resource.Bundle ?? "", integrity = resource.Integrity ?? "", crossorigin = resource.CrossOrigin ?? "" });
+                    }
+                    if (scripts.Any())
+                    {
+                        var interop = new Interop(JSRuntime);
+                        await interop.IncludeScripts(scripts.ToArray());
+                    }
+                }
+            }
+        }
 
         // path method
 
@@ -90,6 +119,54 @@ namespace Oqtane.Modules
             return Utilities.ContentUrl(PageState.Alias, fileid);
         }
 
+        public virtual Dictionary<string, string> GetUrlParameters(string parametersTemplate = "")
+        {
+            var urlParameters = new Dictionary<string, string>();
+            string[] templateSegments;
+            var parameters = PageState.UrlParameters.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var parameterId = 0;
+
+            if (string.IsNullOrEmpty(parametersTemplate))
+            {
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    urlParameters.TryAdd("parameter" + i, parameters[i]);
+                }
+            }
+            else
+            {
+                templateSegments = parametersTemplate.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+                if (parameters.Length == templateSegments.Length)
+                {
+                    for (int i = 0; i < parameters.Length; i++)
+                    {
+                        if (parameters.Length > i)
+                        {
+                            if (templateSegments[i] == parameters[i])
+                            {
+                                urlParameters.TryAdd("parameter" + parameterId, parameters[i]);
+                                parameterId++;
+                            }
+                            else if (templateSegments[i].StartsWith("{") && templateSegments[i].EndsWith("}"))
+                            {
+                                var key = templateSegments[i].Replace("{", "");
+                                key = key.Replace("}", "");
+                                urlParameters.TryAdd(key, parameters[i]);
+                            }
+                            else
+                            {
+                                i = parameters.Length;
+                                urlParameters.Clear();
+                            }
+                        }
+                    }
+                }
+            }
+
+            return urlParameters;
+        }
+
         // user feedback methods
         public void AddModuleMessage(string message, MessageType type)
         {
@@ -128,12 +205,15 @@ namespace Oqtane.Modules
                 case "add":
                     logFunction = LogFunction.Create;
                     break;
+
                 case "edit":
                     logFunction = LogFunction.Update;
                     break;
+
                 case "delete":
                     logFunction = LogFunction.Delete;
                     break;
+
                 default:
                     logFunction = LogFunction.Read;
                     break;

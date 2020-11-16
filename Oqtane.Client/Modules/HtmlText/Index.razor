@@ -7,10 +7,15 @@
 
 @if (PageState.EditMode)
 {
-    <br /><ActionLink Action="Edit" /><br /><br />
+    <br /><ActionLink Action="Edit" EditMode="true" /><br /><br />
 }
 
 @code {
+    public override List<Resource> Resources => new List<Resource>()
+    {
+        new Resource { ResourceType = ResourceType.Stylesheet, Url = ModulePath() + "Module.css" }
+    };
+
     private string content = "";
 
     protected override async Task OnParametersSetAsync()

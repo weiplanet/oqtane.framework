@@ -20,16 +20,23 @@
 }
 
 @code {
+    public override SecurityAccessLevel SecurityAccessLevel => SecurityAccessLevel.Edit;
+
+    public override string Title => "Edit Html/Text";
+
+    public override List<Resource> Resources => new List<Resource>()
+    {
+        new Resource { ResourceType = ResourceType.Stylesheet, Url = ModulePath() + "Module.css" },
+        new Resource { ResourceType = ResourceType.Stylesheet, Url = "css/quill/quill1.3.6.bubble.css" },
+        new Resource { ResourceType = ResourceType.Stylesheet, Url = "css/quill/quill1.3.6.snow.css" }
+    };
+
     private RichTextEditor RichTextEditorHtml;
     private string _content = null;
     private string _createdby;
     private DateTime _createdon;
     private string _modifiedby;
     private DateTime _modifiedon;
-
-    public override SecurityAccessLevel SecurityAccessLevel => SecurityAccessLevel.Edit;
-
-    public override string Title => "Edit Html/Text";
 
     protected override async Task OnInitializedAsync()
     {

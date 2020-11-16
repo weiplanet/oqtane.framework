@@ -24,10 +24,10 @@
                     </td>
                     <td>
                         <select id="container" class="form-control" @bind="@_containerType">
-                            <option value="">&lt;Select Container&gt;</option>
-                            @foreach (KeyValuePair<string, string> container in _containers)
+                            <option value="-">&lt;Inherit From Page Or Site&gt;</option>
+                            @foreach (var container in _containers)
                             {
-                                <option value="@container.Key">@container.Value</option>
+                                <option value="@container.TypeName">@container.Name</option>
                             }
                         </select>
                     </td>
@@ -63,7 +63,7 @@
         }
     </TabPanel>
     <TabPanel Name="Permissions">
-        @if (_containers != null)
+        @if (_permissions != null)
         {
             <table class="table table-borderless">
                 <tr>
@@ -85,12 +85,12 @@
 <NavLink class="btn btn-secondary" href="@NavigateUrl()">Cancel</NavLink>
 
 @code {
-    private Dictionary<string, string> _containers;
+    private List<ThemeControl> _containers = new List<ThemeControl>();
     private string _title;
     private string _containerType;
     private string _allPages = "false";
     private string _permissionNames = "";
-    private string _permissions;
+    private string _permissions = null;
     private string _pageId;
     private PermissionGrid _permissionGrid;
     private Type _settingsModuleType;
@@ -105,8 +105,16 @@
     protected override async Task OnInitializedAsync()
     {
         _title = ModuleState.Title;
-        _containers = ThemeService.GetContainerTypes(await ThemeService.GetThemesAsync());
+        _containers = ThemeService.GetContainerControls(await ThemeService.GetThemesAsync(), PageState.Page.ThemeType);
         _containerType = ModuleState.ContainerType;
+        if (!string.IsNullOrEmpty(PageState.Page.DefaultContainerType) && _containerType == PageState.Page.DefaultContainerType)
+        {
+            _containerType = "-";
+        }
+        if (_containerType == PageState.Site.DefaultContainerType)
+        {
+            _containerType = "-";
+        }
         _allPages = ModuleState.AllPages.ToString();
         _permissions = ModuleState.Permissions;
         _permissionNames = ModuleState.ModuleDefinition.PermissionNames;
@@ -115,8 +123,8 @@
         _settingsModuleType = Type.GetType(ModuleState.ModuleType);
         if (_settingsModuleType != null)
         {
-            var moduleobject = Activator.CreateInstance(_settingsModuleType);
-            _settingstitle = (string)_settingsModuleType.GetProperty("Title").GetValue(moduleobject, null);
+            var moduleobject = Activator.CreateInstance(_settingsModuleType) as IModuleControl;
+            _settingstitle = moduleobject.Title;
             if (string.IsNullOrEmpty(_settingstitle))
             {
                 _settingstitle = "Other Settings";
@@ -136,7 +144,15 @@
         var pagemodule = await PageModuleService.GetPageModuleAsync(ModuleState.PageModuleId);
         pagemodule.PageId = int.Parse(_pageId);
         pagemodule.Title = _title;
-        pagemodule.ContainerType = _containerType;
+        pagemodule.ContainerType = (_containerType != "-") ? _containerType : string.Empty;
+        if (!string.IsNullOrEmpty(pagemodule.ContainerType) && pagemodule.ContainerType == PageState.Page.DefaultContainerType)
+        {
+            pagemodule.ContainerType = string.Empty;
+        }
+        if (!string.IsNullOrEmpty(pagemodule.ContainerType) && pagemodule.ContainerType == PageState.Site.DefaultContainerType)
+        {
+            pagemodule.ContainerType = string.Empty;
+        }
         await PageModuleService.UpdatePageModuleAsync(pagemodule);
         await PageModuleService.UpdatePageModuleOrderAsync(pagemodule.PageId, pagemodule.Pane);
 

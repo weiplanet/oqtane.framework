@@ -170,6 +170,21 @@ namespace Oqtane.Services
         // can be used to override the default alias
         public Alias Alias { get; set; }
 
+        // add entityid parameter to url for custom authorization policy
+        public string CreateAuthorizationPolicyUrl(string url, int entityId)
+        {
+            string qs = "entityid=" + entityId.ToString();
+
+            if (url.Contains("?"))
+            {
+                return url + "&" + qs;
+            }
+            else
+            {
+                return url + "?" + qs;
+            }
+        }
+
         [Obsolete("This method is obsolete. Use CreateApiUrl(Alias alias, string serviceName) instead.", false)]
         public string CreateApiUrl(Alias alias, string absoluteUri, string serviceName)
         {

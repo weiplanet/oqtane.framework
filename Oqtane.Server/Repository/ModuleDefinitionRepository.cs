@@ -188,18 +188,15 @@ namespace Oqtane.Repository
         private List<ModuleDefinition> LoadModuleDefinitionsFromAssembly(List<ModuleDefinition> moduledefinitions, Assembly assembly)
         {
             ModuleDefinition moduledefinition;
+
             Type[] modulecontroltypes = assembly.GetTypes().Where(item => item.GetInterfaces().Contains(typeof(IModuleControl))).ToArray();
             foreach (Type modulecontroltype in modulecontroltypes)
             {
                 // Check if type should be ignored
-                if (modulecontroltype.Name == "ModuleBase"
-                    || modulecontroltype.IsGenericType
-                    || modulecontroltype.IsAbstract
-                    || Attribute.IsDefined(modulecontroltype, typeof(OqtaneIgnoreAttribute))
-                ) continue;
+                if (modulecontroltype.IsOqtaneIgnore()) continue;
 
-                string moduleNamespace = modulecontroltype.Namespace;
-                string qualifiedModuleType = moduleNamespace  + ", " + modulecontroltype.Assembly.GetName().Name;
+                // create namespace root typename
+                string qualifiedModuleType = modulecontroltype.Namespace + ", " + modulecontroltype.Assembly.GetName().Name;
 
                 int index = moduledefinitions.FindIndex(item => item.ModuleDefinitionName == qualifiedModuleType);
                 if (index == -1)
@@ -208,21 +205,21 @@ namespace Oqtane.Repository
                     Type moduletype = assembly
                         .GetTypes()
                         .Where(item => item.Namespace != null)
-                        .Where(item => item.Namespace.StartsWith(moduleNamespace))
+                        .Where(item => item.Namespace == modulecontroltype.Namespace || item.Namespace.StartsWith(modulecontroltype.Namespace + "."))
                         .FirstOrDefault(item => item.GetInterfaces().Contains(typeof(IModule)));
                     if (moduletype != null)
                     {
                         // get property values from IModule
-                        var moduleobject = Activator.CreateInstance(moduletype);
-                        moduledefinition = (ModuleDefinition) moduletype.GetProperty("ModuleDefinition").GetValue(moduleobject);
+                        var moduleobject = Activator.CreateInstance(moduletype) as IModule;
+                        moduledefinition = moduleobject.ModuleDefinition;
                     }
                     else
                     {
                         // set default property values
                         moduledefinition = new ModuleDefinition
                         {
-                            Name = moduleNamespace.Substring(moduleNamespace.LastIndexOf(".") + 1),
-                            Description = "Manage " + moduleNamespace.Substring(moduleNamespace.LastIndexOf(".") + 1),
+                            Name = Utilities.GetTypeNameLastSegment(modulecontroltype.Namespace, 0),
+                            Description = "Manage " + Utilities.GetTypeNameLastSegment(modulecontroltype.Namespace, 0),
                             Categories = ((qualifiedModuleType.StartsWith("Oqtane.Modules.Admin.")) ? "Admin" : "")
                         };
                     }
@@ -230,7 +227,7 @@ namespace Oqtane.Repository
                     // set internal properties
                     moduledefinition.ModuleDefinitionName = qualifiedModuleType;
                     moduledefinition.Version = ""; // will be populated from database
-                    moduledefinition.ControlTypeTemplate = moduleNamespace + "." + Constants.ActionToken + ", " + modulecontroltype.Assembly.GetName().Name;
+                    moduledefinition.ControlTypeTemplate = modulecontroltype.Namespace + "." + Constants.ActionToken + ", " + modulecontroltype.Assembly.GetName().Name;
                     moduledefinition.AssemblyName = assembly.GetName().Name;
 
                     if (string.IsNullOrEmpty(moduledefinition.Categories))
@@ -242,15 +239,15 @@ namespace Oqtane.Repository
                     {
                         moduledefinition.Permissions = new List<Permission>
                         {
-                            new Permission(PermissionNames.Utilize, Constants.AdminRole, true)
+                            new Permission(PermissionNames.Utilize, RoleNames.Admin, true)
                         }.EncodePermissions();
                     }
                     else
                     {
                         moduledefinition.Permissions = new List<Permission>
                         {
-                            new Permission(PermissionNames.Utilize, Constants.AdminRole, true),
-                            new Permission(PermissionNames.Utilize, Constants.RegisteredRole, true)
+                            new Permission(PermissionNames.Utilize, RoleNames.Admin, true),
+                            new Permission(PermissionNames.Utilize, RoleNames.Registered, true)
                         }.EncodePermissions();
                     }
 
@@ -261,8 +258,8 @@ namespace Oqtane.Repository
 
                 moduledefinition = moduledefinitions[index];
                 // actions
-                var modulecontrolobject = Activator.CreateInstance(modulecontroltype);
-                string actions = (string) modulecontroltype.GetProperty("Actions")?.GetValue(modulecontrolobject);
+                var modulecontrolobject = Activator.CreateInstance(modulecontroltype) as IModuleControl;
+                string actions = modulecontrolobject.Actions;
                 if (!string.IsNullOrEmpty(actions))
                 {
                     foreach (string action in actions.Split(','))
